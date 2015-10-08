@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title></title>
+	<style>
+		body {
+			background: rgb(30, 42, 48);
+			transition: background-color 0.07s;
+		}
+	</style>
+</head>
+<body>
+<script>
+	var audioCtx = new AudioContext();
+	var analyser = audioCtx.createAnalyser();
+	analyser.fftSize = 512;
+	var fftData = new Uint8Array(analyser.frequencyBinCount);
+
+	function load(source, file, callback) {
+		var request = new XMLHttpRequest();
+		request.open('GET', file, true);
+		request.responseType = 'arraybuffer';
+		request.addEventListener("load", function () {
+			audioCtx.decodeAudioData(request.response, function (buffer) {
+				source.buffer = buffer;
+				source.loop = true;
+				callback(source);
+			}, function (e) {
+				console.log("Error with decoding audio data" + e.err);
+			});
+		}, false);
+		request.send();
+	}
+	var nToGo = 0;
+	var layers = ["c3.wav.ogg", "c4.wav.ogg", "c5_b.wav.ogg", "c6_hp.wav.ogg", "noise.wav.ogg"].map(function (filename) {
+		var obj = {name: filename, loaded: false};
+		var source = audioCtx.createBufferSource();
+		load(source, filename, function() {
+			source.start(0, Math.random() * 0.75 * source.buffer.duration);
+			obj.loaded = true;
+			nToGo--;
+			if(nToGo == 0) {
+				console.log("here we go!");
+				scheduleAdjustments();
+			}
+		})
+		nToGo++;
+		var gain = audioCtx.createGain();
+		gain.gain.value = 0;
+		source.connect(gain);
+		gain.connect(audioCtx.destination);
+		gain.connect(analyser);
+		obj.gain = gain;
+		obj.source = source;
+		return obj;
+	});
+
+	function scheduleParamAdj(title, param, minTime, maxTime, minVal, maxVal) {
+		var time = minTime + Math.random() * (maxTime - minTime);
+		var newValue = minVal + Math.random() * (maxVal - minVal);
+		param.cancelScheduledValues(audioCtx.currentTime);
+		param.setValueAtTime(param.value, audioCtx.currentTime);
+		param.linearRampToValueAtTime(newValue, audioCtx.currentTime + time);
+		console.log(title, param.value, "->", newValue, "dur", time);
+	}
+
+	function scheduleAdjustments() {
+		layers.forEach(function(l) {
+			if(Math.random() < 0.75) return;
+			scheduleParamAdj(l.name + ".gain", l.gain.gain, 3, 10, 0.1, 0.7);
+			scheduleParamAdj(l.name + ".detune", l.source.detune, 7, 10, -50, +50);
+		});
+	}
+
+	function updateFft() {
+		analyser.getByteFrequencyData(fftData);
+		var nBins = fftData.length / 2;
+		var vs = [
+			fftData[1] / 255,
+			fftData[0 | (nBins * 0.1)] / 255,
+			fftData[0 | (nBins * 0.4)] / 255,
+			fftData[0 | (nBins * 0.6)] / 255
+		];
+		var cs = [
+			[30, 42, 48],
+			[64,71,73],
+			[32,41,63],
+			[105, 5, 0]
+		];
+		var z = vs.reduce(function(a, b) { return a + b; }, 0);
+		vs = vs.map(function(v) { return (z == 0 ? 0 : v / z); });
+		var c = [0, 1, 2].map(function(chan) {
+			var chanA = vs.map(function(mul, idx) { return cs[idx][chan] * mul; });
+			return Math.round(chanA.reduce(function(a, b) { return a + b; }, 0));
+		});
+		//console.log(c);
+		//console.log([].slice.call(fftData, 0, nBins).join(","));
+		document.body.style.backgroundColor = "rgb(" + c.join(",") + ")";
+	}
+
+	setInterval(scheduleAdjustments, 10000);
+	setInterval(updateFft, 100);
+</script>
+</body>
+</html>
